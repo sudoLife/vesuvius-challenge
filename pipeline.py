@@ -38,11 +38,20 @@ class Pipeline:
         img = self.resize(img)
         return np.expand_dims(img, axis=-1)
 
-    def load_volume(self, split, index):
-        # A more memory-efficient volune loader
+    def load_surface_volume(self, split, index):
+        """Loads surface volume
+
+        Args:
+            split (str): train or test
+            index (str|int): folder index
+
+        Returns:
+            np.ndarray: volumes
+        """
         fnames = [f"{self.data_dir}/{split}/{index}/surface_volume/{i:02}.tif"
                   for i in range(self.z_start, self.z_start + self.z_dim)]
 
+        # NOTE: this batch size doesn't really have anything to do with the training batch size
         fname_batches = [fnames[i:i + self.batch_size] for i in range(0, len(fnames), self.batch_size)]
         volumes = []
         for fname_batch in fname_batches:
@@ -56,16 +65,33 @@ class Pipeline:
         return np.concatenate(volumes, axis=-1)
 
     def load_sample(self, split, index):
+        """Load data from a specified index folder
+
+        Args:
+            split (str): train or test. For test, won't load the labels
+            index (int|str): folder index
+
+        Returns:
+            tuple: volume, mask, labels if train, else volume, mask
+        """
         print(f"Loading '{split}/{index}'...")
         gc.collect()
         if split == "train":
-            return self.load_volume(
+            return self.load_surface_volume(
                 split, index), self.load_mask(
                 split, index), self.load_labels(
                 split, index)
-        return self.load_volume(split, index), self.load_mask(split, index), None
+        return self.load_surface_volume(split, index), self.load_mask(split, index), None
 
     def sample_random_location(self, shape):
+        """Sample a random location on the image
+
+        Args:
+            shape (iterable): shape of the image
+
+        Returns:
+            tuple: x and y coordinates
+        """
         x = random.randint(self.patch_halfsize, shape[0] - self.patch_halfsize - 1)
         y = random.randint(self.patch_halfsize, shape[1] - self.patch_halfsize - 1)
         return (x, y)
@@ -96,9 +122,17 @@ class Pipeline:
         return label.astype("float32") / 255.
 
     def make_random_data_generator(self, volume, mask, labels):
+        """Create an endless sampling of patches from random locations
+
+        Args:
+            volume (np.ndarray): input volume
+            mask (np.ndarray): volume mask
+            labels (np.ndarray): labels
+        """
         def data_generator():
             while True:
                 loc = self.sample_random_location(mask.shape)
+                # check if the center is in the mask
                 if mask[loc[0], loc[1]]:
                     patch = self.extract_patch(loc, volume)
                     label = self.extract_labels(loc, labels)
