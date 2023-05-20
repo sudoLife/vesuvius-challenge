@@ -11,7 +11,9 @@ from skimage import exposure
 
 class Pipeline:
 
-    def __init__(self, data_dir, patch_size, downsampling, z_dim, z_start, batch_size):
+    def __init__(
+            self, data_dir, patch_size, downsampling, z_dim, z_start, batch_size, train_transform=None,
+            use_adapt_hist=True):
         self.data_dir = data_dir
         self.patch_size = patch_size
         self.patch_halfsize = patch_size // 2
@@ -19,6 +21,8 @@ class Pipeline:
         self.z_dim = z_dim
         self.z_start = z_start
         self.batch_size = batch_size
+        self.train_transform = train_transform
+        self.use_adapt_hist = use_adapt_hist
 
     def get_input_shape(self):
         return (self.patch_size, self.patch_size, self.z_dim)
@@ -62,7 +66,8 @@ class Pipeline:
                 # shape of (height, width) with values between 0 and 1
                 img = cv2.imread(fname, cv2.IMREAD_GRAYSCALE)
                 img = self.resize(img)
-                img = (exposure.equalize_adapthist(img) * 255.0).astype('uint8')
+                if self.use_adapt_hist:
+                    img = (exposure.equalize_adapthist(img) * 255.0).astype('uint8')
                 z_slices.append(img)
             volumes.append(np.stack(z_slices, axis=-1))
             del z_slices
@@ -116,7 +121,7 @@ class Pipeline:
         y = location[1]
         patch = volume[x - self.patch_halfsize:x + self.patch_halfsize,
                        y - self.patch_halfsize:y + self.patch_halfsize, :]
-        return patch.astype("float32") / 255.0
+        return patch.astype("float32")
 
     def extract_labels(self, location, labels):
         x = location[0]
@@ -124,7 +129,7 @@ class Pipeline:
 
         label = labels[x - self.patch_halfsize:x + self.patch_halfsize,
                        y - self.patch_halfsize:y + self.patch_halfsize, :]
-        return label.astype("float32") / 255.0
+        return label.astype("float32")
 
     def make_random_data_generator(self, volume, mask, labels):
         """Create an endless sampling of patches from random locations
@@ -141,7 +146,12 @@ class Pipeline:
                 if mask[loc[0], loc[1]]:
                     patch = self.extract_patch(loc, volume)
                     label = self.extract_labels(loc, labels)
-                    yield patch, label
+
+                    if self.train_transform:
+                        res = self.train_transform(image=patch, mask=label)
+                        yield res['image'] / 255., res['mask'] / 255.0
+                    else:
+                        yield patch / 255.0, label / 255.0
         return data_generator
 
     def make_iterated_data_generator(self, volume, mask, labels=None):
@@ -152,10 +162,10 @@ class Pipeline:
             for loc in locations:
                 patch = self.extract_patch(loc, volume)
                 if labels is None:
-                    yield patch
+                    yield patch / 255.0
                 else:
                     label = self.extract_labels(loc, labels)
-                    yield patch, label
+                    yield patch / 255.0, label / 255.0
         return data_generator
 
     def make_tf_dataset(self, gen_fn, labeled=True):
@@ -172,7 +182,7 @@ class Pipeline:
         )
         return ds.prefetch(tf.data.AUTOTUNE).batch(self.batch_size)
 
-    def make_datasets_for_fold(self, fold, train_augment_fn=None):
+    def make_datasets_for_fold(self, fold):
         train_volumes = fold["train_volumes"]
         train_masks = fold["train_masks"]
         train_labels = fold["train_labels"]
@@ -191,9 +201,6 @@ class Pipeline:
             )
             all_train_ds.append(train_ds)
         train_ds = tf.data.Dataset.sample_from_datasets(all_train_ds)
-
-        if train_augment_fn:
-            train_ds = train_ds.map(train_augment_fn, num_parallel_calls=tf.data.AUTOTUNE)
         train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
 
         if not include_validation:

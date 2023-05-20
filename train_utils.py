@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
-
+import albumentations as A
 
 @tf.function
 def train_augment_fn(patch, labels):
@@ -34,3 +34,12 @@ def predict_and_assemble(pipeline, volume, mask, threshold, model):
         all_binary_pred[l:r, b:t] = p
 
     return all_pred, all_binary_pred, pred
+
+def augment_albumentations():
+    transforms = A.Compose([
+        A.Rotate(),
+        A.VerticalFlip(),
+        A.GridDistortion()
+    ])
+
+    return transforms

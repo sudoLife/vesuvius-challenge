@@ -16,10 +16,12 @@ def main():
     epochs = 200
     steps_per_epoch = 100
     # this means it will take val_step batches
-    val_step = 10
     backbone = 'resnet18'  # 'resnet18'
 
-    pipeline = Pipeline(data_dir, patch_size, downsampling, z_dim, z_start, batch_size)
+    train_transform = augment_albumentations()
+
+    pipeline = Pipeline(data_dir, patch_size, downsampling, z_dim, z_start, batch_size,
+                        train_transform=train_transform, use_adapt_hist=False)
 
     preprocessing = sm.get_preprocessing(backbone)
     # def preprocessing(x): return x
@@ -65,8 +67,9 @@ def main():
     gc.collect()
 
     # for now let's only
-    train_ds, val_ds = pipeline.make_datasets_for_fold(
-        dev_folds['dev_1'], train_augment_fn=train_augment_fn)
+    train_ds, val_ds = pipeline.make_datasets_for_fold(dev_folds['dev_1'])
+
+    val_step = len(pipeline.list_all_locations(dev_folds['dev_1']['validation_mask'])) // batch_size
 
     # If you need to specify non-standard input shape
     model = sm.Unet(
@@ -80,7 +83,7 @@ def main():
 
     model.compile(optimizer=optimizer, loss=sm.losses.bce_jaccard_loss, metrics=[sm.metrics.iou_score])
 
-    title = backbone
+    title = backbone + "no_adapthist_16_volumes_from_middle"
 
     logdir_current = 'logs/' + datetime.now().strftime("%Y%m%d-%H%M%S") + title
 
