@@ -21,7 +21,6 @@ def predict_and_assemble(pipeline, volume, mask, threshold, model):
     pred = []
 
     for i, patch in tqdm(enumerate(test_a_ds())):
-        # pred[i]: (128, 128, 1)
         p = model.predict(np.expand_dims(patch, 0))[0]
         pred.append(p)
         c = locations[i]
