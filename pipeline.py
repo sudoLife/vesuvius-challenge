@@ -6,6 +6,7 @@ import gc
 import cv2
 import time
 from tqdm import tqdm
+from skimage import exposure
 
 
 class Pipeline:
@@ -53,15 +54,19 @@ class Pipeline:
 
         # NOTE: this batch size doesn't really have anything to do with the training batch size
         fname_batches = [fnames[i:i + self.batch_size] for i in range(0, len(fnames), self.batch_size)]
+        # NOTE: wouldn't it be faster to pre-allocate this with a numpy array?
         volumes = []
         for fname_batch in fname_batches:
             z_slices = []
             for fname in tqdm(fname_batch):
-                img = cv2.imread(fname, 0)
+                # shape of (height, width) with values between 0 and 1
+                img = cv2.imread(fname, cv2.IMREAD_GRAYSCALE)
                 img = self.resize(img)
+                img = (exposure.equalize_adapthist(img) * 255.0).astype('uint8')
                 z_slices.append(img)
             volumes.append(np.stack(z_slices, axis=-1))
             del z_slices
+            gc.collect()
         return np.concatenate(volumes, axis=-1)
 
     def load_sample(self, split, index):
@@ -111,7 +116,7 @@ class Pipeline:
         y = location[1]
         patch = volume[x - self.patch_halfsize:x + self.patch_halfsize,
                        y - self.patch_halfsize:y + self.patch_halfsize, :]
-        return patch.astype("float32") / 255.
+        return patch.astype("float32") / 255.0
 
     def extract_labels(self, location, labels):
         x = location[0]
@@ -119,7 +124,7 @@ class Pipeline:
 
         label = labels[x - self.patch_halfsize:x + self.patch_halfsize,
                        y - self.patch_halfsize:y + self.patch_halfsize, :]
-        return label.astype("float32") / 255.
+        return label.astype("float32") / 255.0
 
     def make_random_data_generator(self, volume, mask, labels):
         """Create an endless sampling of patches from random locations
@@ -141,6 +146,7 @@ class Pipeline:
 
     def make_iterated_data_generator(self, volume, mask, labels=None):
         locations = self.list_all_locations(mask)
+        print(f"Iterated dataset size: {len(locations)}")
 
         def data_generator():
             for loc in locations:
