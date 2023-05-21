@@ -4,3 +4,5 @@ dataset
 chkpt
 imgs
 submission
+logs
+nohup.out
