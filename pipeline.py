@@ -31,7 +31,7 @@ class Pipeline:
                 ValueError: If both z_dim and z_indices are not set, or if both z_dim and z_indices are set.
             """
         if (z_dim is None and layers) is None or (z_dim is not None and layers is not None):
-            raise ValueError('Either {z_start, z_dim} or {z_indices} must be set')
+            raise ValueError('Either {z_start, z_dim} or {layers} must be set')
 
         self.data_dir = data_dir
         self.patch_size = patch_size
