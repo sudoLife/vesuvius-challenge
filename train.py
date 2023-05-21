@@ -4,24 +4,33 @@ import segmentation_models as sm
 import matplotlib.pyplot as plt
 import pickle
 from datetime import datetime
+from segmentation_models.utils import set_regularization
 
 
 def main():
-    data_dir = "./dataset/"
-    patch_size = 800  # e.g. 128x128
-    downsampling = 1.0  # setting this to e.g. 0.5 means images will be loaded as 2x smaller. 1 does nothing.
-    z_dim = 40   # number of slices in the z direction. max value is 65 - z_start
-    z_start = 0  # offset of slices in the z direction
-    batch_size = 4
-    epochs = 200
-    steps_per_epoch = 100
-    # this means it will take val_step batches
-    backbone = 'resnet18'  # 'resnet18'
 
     train_transform = augment_albumentations()
 
-    pipeline = Pipeline(data_dir, patch_size, downsampling, z_dim, z_start, batch_size,
-                        train_transform=train_transform, use_adapt_hist=False)
+    data_params = {
+        "data_dir": "./dataset/",
+        "patch_size": 512,
+        "downsampling": 1.0,
+        # "layers": 40,
+        # "z_start": 0,
+        'layers': list(range(11, 24)) + list(range(27, 36)),
+        "batch_size": 4,
+        'train_transform': train_transform,  # either None or this
+        'use_adapt_hist': False
+    }
+
+    epochs = 200
+    steps_per_epoch = 100
+    backbone = 'resnet18'  # 'resnet18'
+
+    # NOTE: set this to something memorable as it's going to name the log folder
+    title = backbone + "_adam_jaccard_noadapthist_transform_512_12-24_and_28-36_layers"
+
+    pipeline = Pipeline(**data_params)
 
     preprocessing = sm.get_preprocessing(backbone)
     # def preprocessing(x): return x
@@ -67,23 +76,24 @@ def main():
     gc.collect()
 
     # for now let's only
-    train_ds, val_ds = pipeline.make_datasets_for_fold(dev_folds['dev_1'])
+    train_ds, val_ds = pipeline.make_datasets_for_fold(dev_folds['dev_3'])
 
-    val_step = len(pipeline.list_all_locations(dev_folds['dev_1']['validation_mask'])) // batch_size
+    val_step = len(pipeline.list_all_locations(dev_folds['dev_3']['validation_mask'])) // data_params['batch_size']
 
     # If you need to specify non-standard input shape
     model = sm.Unet(
         backbone,
         input_shape=pipeline.get_input_shape(),
         encoder_weights=None,
-        classes=1
+        classes=1,
+        decoder_use_batchnorm=True
     )
+
+    # model = set_regularization(model, tf.keras.regularizers.l2(0.0001))
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.0007)
 
     model.compile(optimizer=optimizer, loss=sm.losses.bce_jaccard_loss, metrics=[sm.metrics.iou_score])
-
-    title = backbone + "no_adapthist_16_volumes_from_middle"
 
     logdir_current = 'logs/' + datetime.now().strftime("%Y%m%d-%H%M%S") + title
 
@@ -96,10 +106,9 @@ def main():
         save_freq=steps_per_epoch * 10,
     )
 
-    history = model.fit(train_ds, batch_size=batch_size, epochs=epochs, steps_per_epoch=steps_per_epoch,
-                        validation_data=val_ds, validation_steps=val_step, callbacks=[callback_chkpt, tensorboard_callback])
+    model.fit(train_ds, batch_size=data_params['batch_size'], epochs=epochs, steps_per_epoch=steps_per_epoch,
+              validation_data=val_ds, validation_steps=val_step, callbacks=[callback_chkpt, tensorboard_callback])
 
-    # fmtstr = f'unet2d_b{batch_size}_p{patch_size}_d{downsampling}_zdim{z_dim}_e{epochs}_spe{steps_per_epoch}'
     model.save_weights(logdir_current + '/final_checkpoint')
     print("Done")
 

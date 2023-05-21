@@ -12,20 +12,46 @@ from skimage import exposure
 class Pipeline:
 
     def __init__(
-            self, data_dir, patch_size, downsampling, z_dim, z_start, batch_size, train_transform=None,
-            use_adapt_hist=True):
+            self, data_dir, patch_size, downsampling, batch_size, z_dim=None, z_start=None, layers=None,
+            train_transform=None, use_adapt_hist=True):
+        """
+            Initializes the dataset object.
+
+            Args:
+                data_dir (str): Directory path to the data.
+                patch_size (int): Size of the patches to extract from the data.
+                downsampling (int): Downsampling factor for the patches.
+                batch_size (int): Size of the batches for training.
+                z_dim (int, optional): Dimensionality of the z-axis (depth) if using a specific range of z-slices.
+                z_start (int, optional): Starting index of the z-slices range if using a specific range of z-slices.
+                z_indices (list[int], optional): List of 0-index z-slice indices if using specific z-slices.
+                train_transform (callable, optional): Transformations to apply to the training data.
+                use_adapt_hist (bool, optional): Flag indicating whether to use adaptive histogram equalization.
+            Raises:
+                ValueError: If both z_dim and z_indices are not set, or if both z_dim and z_indices are set.
+            """
+        if (z_dim is None and layers) is None or (z_dim is not None and layers is not None):
+            raise ValueError('Either {z_start, z_dim} or {z_indices} must be set')
+
         self.data_dir = data_dir
         self.patch_size = patch_size
         self.patch_halfsize = patch_size // 2
         self.downsampling = downsampling
-        self.z_dim = z_dim
-        self.z_start = z_start
         self.batch_size = batch_size
         self.train_transform = train_transform
         self.use_adapt_hist = use_adapt_hist
+        # TODO: make this a load_surface_volume parameter
+        if z_dim is not None:
+            self.layers = z_dim
+            self.z_start = z_start
+            self.use_ind = False
+        else:
+            self.layers = len(layers)
+            self.z_ind = layers
+            self.use_ind = True
 
     def get_input_shape(self):
-        return (self.patch_size, self.patch_size, self.z_dim)
+        return (self.patch_size, self.patch_size, self.layers)
 
     def resize(self, img):
         if self.downsampling != 1.:
@@ -53,8 +79,11 @@ class Pipeline:
         Returns:
             np.ndarray: volumes
         """
-        fnames = [f"{self.data_dir}/{split}/{index}/surface_volume/{i:02}.tif"
-                  for i in range(self.z_start, self.z_start + self.z_dim)]
+        if self.use_ind:
+            fnames = [f"{self.data_dir}/{split}/{index}/surface_volume/{i:02}.tif" for i in self.z_ind]
+        else:
+            fnames = [f"{self.data_dir}/{split}/{index}/surface_volume/{i:02}.tif"
+                      for i in range(self.z_start, self.z_start + self.layers)]
 
         # NOTE: this batch size doesn't really have anything to do with the training batch size
         fname_batches = [fnames[i:i + self.batch_size] for i in range(0, len(fnames), self.batch_size)]
@@ -171,11 +200,11 @@ class Pipeline:
     def make_tf_dataset(self, gen_fn, labeled=True):
         if labeled:
             output_signature = (
-                tf.TensorSpec(shape=(self.patch_size, self.patch_size, self.z_dim), dtype=tf.float32),
+                tf.TensorSpec(shape=(self.patch_size, self.patch_size, self.layers), dtype=tf.float32),
                 tf.TensorSpec(shape=(self.patch_size, self.patch_size, 1), dtype=tf.float32),
             )
         else:
-            output_signature = tf.TensorSpec(shape=(self.patch_size, self.patch_size, self.z_dim), dtype=tf.float32)
+            output_signature = tf.TensorSpec(shape=(self.patch_size, self.patch_size, self.layers), dtype=tf.float32)
         ds = tf.data.Dataset.from_generator(
             gen_fn,
             output_signature=output_signature,
