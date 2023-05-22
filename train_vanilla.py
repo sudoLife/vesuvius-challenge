@@ -87,12 +87,12 @@ def main():
 
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir_current + '/scalars')
     callback_chkpt = tf.keras.callbacks.ModelCheckpoint(
-        logdir_current + '/chkpt',
+        logdir_current + '/model.h5',
         monitor='val_iou_score',
         mode='max',
         save_weights_only=False,
         # save_best_only=True,
-        save_freq=5 * steps_per_epoch,
+        save_freq=10 * steps_per_epoch,
     )
 
     if not os.path.exists(logdir_current):
