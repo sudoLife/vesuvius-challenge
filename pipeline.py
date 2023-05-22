@@ -13,7 +13,7 @@ class Pipeline:
 
     def __init__(
             self, data_dir, patch_size, downsampling, batch_size, z_dim=None, z_start=None, layers=None,
-            train_transform=None, use_adapt_hist=True):
+            train_transform=None, use_adapt_hist=True, subtract_ind=None):
         """
             Initializes the dataset object.
 
@@ -40,6 +40,7 @@ class Pipeline:
         self.batch_size = batch_size
         self.train_transform = train_transform
         self.use_adapt_hist = use_adapt_hist
+        self.subtract_ind = subtract_ind
         # TODO: make this a load_surface_volume parameter
         if z_dim is not None:
             self.layers = z_dim
@@ -71,8 +72,7 @@ class Pipeline:
 
     def load_surface_volume(self, split, index):
         """Loads surface volume
-
-        Args:
+data_dir, patch_size, downsampling, batch_size, layers=layers, train_transform=train_transform, use_adapt_hist=False
             split (str): train or test
             index (str|int): folder index
 
@@ -88,12 +88,21 @@ class Pipeline:
         # NOTE: this batch size doesn't really have anything to do with the training batch size
         fname_batches = [fnames[i:i + self.batch_size] for i in range(0, len(fnames), self.batch_size)]
         # NOTE: wouldn't it be faster to pre-allocate this with a numpy array?
+        if self.subtract_ind:
+            subtract_img = cv2.imread(
+                f"{self.data_dir}/{split}/{index}/surface_volume/{self.subtract_ind:02}.tif", cv2.IMREAD_GRAYSCALE)
+        else:
+            subtract_img = None
+
         volumes = []
         for fname_batch in fname_batches:
             z_slices = []
             for fname in tqdm(fname_batch):
                 # shape of (height, width) with values between 0 and 1
                 img = cv2.imread(fname, cv2.IMREAD_GRAYSCALE)
+                if subtract_img is not None:
+                    img = np.abs(img - subtract_img).astype('float')
+                    img = (img * 255.0 / np.max(img)).astype('uint8')
                 img = self.resize(img)
                 if self.use_adapt_hist:
                     img = (exposure.equalize_adapthist(img) * 255.0).astype('uint8')
