@@ -2,6 +2,9 @@ import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
 import albumentations as A
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, concatenate
+from tensorflow.keras.models import Model
+
 
 @tf.function
 def train_augment_fn(patch, labels):
@@ -35,6 +38,7 @@ def predict_and_assemble(pipeline, volume, mask, threshold, model):
 
     return all_pred, all_binary_pred, pred
 
+
 def augment_albumentations():
     transforms = A.Compose([
         A.Rotate(),
@@ -43,3 +47,43 @@ def augment_albumentations():
     ])
 
     return transforms
+
+
+def create_basic_unet_model(input_shape, filter_nums, filter_size=(3, 3), conv_act='relu', final_act='sigmoid'):
+    # variable number of input channels
+    inputs = Input(input_shape)
+
+    def encoding_block(inputs, filter_num):
+        conv = Conv2D(filter_num, filter_size, activation=conv_act, padding='same')(inputs)
+        conv = Conv2D(filter_num, filter_size, activation=conv_act, padding='same')(conv)
+        pool = MaxPooling2D(pool_size=(2, 2))(conv)
+
+        return conv, pool
+
+    def decoding_block(inputs, skip_connection, filter_num):
+        up = concatenate([UpSampling2D(size=(2, 2))(inputs), skip_connection], axis=3)
+        conv = Conv2D(filter_num, filter_size, activation=conv_act, padding='same')(up)
+        conv = Conv2D(filter_num, filter_size, activation=conv_act, padding='same')(conv)
+
+        return conv
+
+    skip_conns = []
+    conv = inputs
+
+    for filter_num in filter_nums[:-1]:
+        conv, pool = encoding_block(conv, filter_num)
+        skip_conns.append(conv)
+        conv = pool
+
+    # bottom
+    conv = Conv2D(filter_nums[-1], filter_size, activation=conv_act, padding='same')(conv)
+
+    for i in reversed(range(len(skip_conns))):
+        conv = decoding_block(conv, skip_conns[i], filter_nums[i])
+
+    # output
+    output = Conv2D(1,  (1, 1), activation=final_act)(conv)
+
+    model = Model(inputs=[inputs], outputs=output)
+    model.summary()
+    return model
